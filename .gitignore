@@ -65,3 +65,6 @@ htmlcov/
 *.bak
 *.backup
 *.tmp
+
+# Evaluation outputs
+outputs/
