@@ -6,38 +6,67 @@ from game.move import Move
 
 
 class PatternType(IntEnum):
-    """Loại pattern được phát hiện"""
-    WINNING = 5          # 5 liên tiếp (chiến thắng)
-    OPEN_4 = 44          # 4 liên tiếp mở 2 mặt (44XX00 hoặc 00XX44)
-    LIVE_3 = 33          # 3 liên tiếp mở 2 mặt (33X00 hoặc 00X33)
-    DEAD_4 = 444         # 4 liên tiếp, 1 mặt bị chặn
-    LIVE_2 = 22          # 2 liên tiếp mở 2 mặt
-    THREAT_4 = 434       # Có 2 cách tạo 4 liên tiếp
-    BLOCKED_3 = 333      # 3 liên tiếp, 1 mặt bị chặn
-    THREAT_3 = 233       # Có 2 cách tạo 3 liên tiếp mở
+    """
+    Pattern của MỘT direction.
+
+    Lưu ý:
+    THREAT_3 / THREAT_4 là pattern của cả move
+    nên sẽ được xử lý ở BoardAnalyzer.
+    """
+
+    NONE = 0
+
+    LIVE_2 = 10
+
+    BLOCKED_3 = 20
+    LIVE_3 = 30
+
+    DEAD_4 = 40
+    OPEN_4 = 50
+
+    WINNING = 100
 
 
 @dataclass
 class LineInfo:
-    """Thông tin về một line (hàng/cột/chéo)"""
-    direction: tuple        # (dr, dc)
-    piece_count: int        # Số quân liên tiếp
-    empty_left: int         # Số ô trống trước (theo hướng âm)
-    empty_right: int        # Số ô trống sau (theo hướng dương)
-    player: int             # Quân của player nào (1=X, 2=O)
-    pattern: PatternType    # Loại pattern
+    direction: tuple
+    piece_count: int
+
+    empty_left: int
+    empty_right: int
+
+    player: int
+
+    pattern: PatternType
 
 
 class PatternAnalyzer:
-    """Phân tích pattern trên board"""
-    
+
     DIRECTIONS = [
-        (1, 0),      # Ngang
-        (0, 1),      # Dọc
-        (1, 1),      # Chéo /
-        (1, -1),     # Chéo \
+        (1, 0),
+        (0, 1),
+        (1, 1),
+        (1, -1),
     ]
-    
+
+    PATTERN_SCORES = {
+        PatternType.NONE: 0,
+
+        PatternType.LIVE_2: 500,
+
+        PatternType.BLOCKED_3: 3_000,
+        PatternType.LIVE_3: 10_000,
+
+        PatternType.DEAD_4: 30_000,
+        PatternType.OPEN_4: 100_000,
+
+        PatternType.WINNING: 1_000_000,
+    }
+
+    @staticmethod
+    def get_pattern_score(pattern: PatternType) -> int:
+        return PatternAnalyzer.PATTERN_SCORES.get(pattern, 0)
+
     @staticmethod
     def get_line_info(
         board,
@@ -46,17 +75,15 @@ class PatternAnalyzer:
         direction: tuple,
         player: int
     ) -> LineInfo:
-        """
-        Lấy thông tin về line tại vị trí (row, col) theo hướng.
-        Trả về LineInfo với piece_count, empty_left, empty_right, pattern.
-        """
+
         dr, dc = direction
-        
-        # Đếm quân liên tiếp theo hướng
+
         piece_count = 1
-        
-        # Đếm về phía âm (-direction)
+
+        # ---- phía âm ----
+
         r, c = row - dr, col - dc
+
         while (
             0 <= r < BOARD_SIZE
             and 0 <= c < BOARD_SIZE
@@ -65,16 +92,20 @@ class PatternAnalyzer:
             piece_count += 1
             r -= dr
             c -= dc
-        
-        # Vị trí ô trống đầu tiên về phía âm
+
         empty_left = 0
-        r, c = row - dr, col - dc
-        if 0 <= r < BOARD_SIZE and 0 <= c < BOARD_SIZE:
-            if board.get_cell(r, c) == EMPTY:
-                empty_left = 1
-        
-        # Đếm về phía dương (+direction)
+
+        if (
+            0 <= r < BOARD_SIZE
+            and 0 <= c < BOARD_SIZE
+            and board.get_cell(r, c) == EMPTY
+        ):
+            empty_left = 1
+
+        # ---- phía dương ----
+
         r, c = row + dr, col + dc
+
         while (
             0 <= r < BOARD_SIZE
             and 0 <= c < BOARD_SIZE
@@ -83,21 +114,22 @@ class PatternAnalyzer:
             piece_count += 1
             r += dr
             c += dc
-        
-        # Vị trí ô trống đầu tiên về phía dương
+
         empty_right = 0
-        r, c = row + dr, col + dc
-        if 0 <= r < BOARD_SIZE and 0 <= c < BOARD_SIZE:
-            if board.get_cell(r, c) == EMPTY:
-                empty_right = 1
-        
-        # Xác định loại pattern
+
+        if (
+            0 <= r < BOARD_SIZE
+            and 0 <= c < BOARD_SIZE
+            and board.get_cell(r, c) == EMPTY
+        ):
+            empty_right = 1
+
         pattern = PatternAnalyzer._classify_pattern(
             piece_count,
             empty_left,
             empty_right
         )
-        
+
         return LineInfo(
             direction=direction,
             piece_count=piece_count,
@@ -106,58 +138,74 @@ class PatternAnalyzer:
             player=player,
             pattern=pattern
         )
-    
+
     @staticmethod
     def _classify_pattern(
         piece_count: int,
         empty_left: int,
         empty_right: int
     ) -> PatternType:
-        """Phân loại pattern dựa vào piece_count và số ô trống"""
-        is_open_both_sides = empty_left > 0 and empty_right > 0
-        is_open_one_side = (empty_left > 0 or empty_right > 0)
-        
+
+        open_both = (
+            empty_left > 0
+            and empty_right > 0
+        )
+
+        open_one = (
+            empty_left > 0
+            or empty_right > 0
+        )
+
         if piece_count >= WIN_LENGTH:
             return PatternType.WINNING
-        elif piece_count == 4:
-            if is_open_both_sides:
+
+        if piece_count == 4:
+
+            if open_both:
                 return PatternType.OPEN_4
-            elif is_open_one_side:
+
+            if open_one:
                 return PatternType.DEAD_4
-            else:
-                return PatternType.DEAD_4  # Bị chặn 2 mặt
-        elif piece_count == 3:
-            if is_open_both_sides:
+
+            return PatternType.DEAD_4
+
+        if piece_count == 3:
+
+            if open_both:
                 return PatternType.LIVE_3
-            elif is_open_one_side:
+
+            if open_one:
                 return PatternType.BLOCKED_3
-            else:
-                return PatternType.BLOCKED_3
-        elif piece_count == 2:
-            if is_open_both_sides:
+
+            return PatternType.NONE
+
+        if piece_count == 2:
+
+            if open_both:
                 return PatternType.LIVE_2
-            else:
-                return PatternType.DEAD_4  # Placeholder
-        else:
-            return PatternType.LIVE_2
-    
+
+            return PatternType.NONE
+
+        return PatternType.NONE
+
     @staticmethod
     def analyze_move(
         board,
         move: Move,
         player: int
     ) -> list[LineInfo]:
-        """
-        Phân tích nước đi: lấy thông tin 4 direction (ngang/dọc/2 chéo).
-        Trả về danh sách LineInfo, sắp xếp theo piece_count (giảm dần).
-        """
+
+        temp_board = board.clone()
+        temp_board.place_piece(
+            move.row,
+            move.col,
+            player
+        )
+
         lines = []
-        
+
         for direction in PatternAnalyzer.DIRECTIONS:
-            # Tạo board tạm để phân tích
-            temp_board = board.clone()
-            temp_board.place_piece(move.row, move.col, player)
-            
+
             line_info = PatternAnalyzer.get_line_info(
                 temp_board,
                 move.row,
@@ -165,66 +213,72 @@ class PatternAnalyzer:
                 direction,
                 player
             )
+
             lines.append(line_info)
-        
-        # Sắp xếp theo piece_count giảm dần
-        lines.sort(key=lambda x: x.piece_count, reverse=True)
-        
+
+        lines.sort(
+            key=lambda line: (
+                line.pattern,
+                line.piece_count
+            ),
+            reverse=True
+        )
+
         return lines
-    
+
     @staticmethod
     def find_winning_moves(
         board,
         valid_moves: list[Move],
         player: int
     ) -> list[Move]:
-        """Tìm các nước có thể chiến thắng ngay lập tức"""
+
         winning_moves = []
-        
+
         for move in valid_moves:
-            temp_board = board.clone()
-            if not temp_board.place_piece(move.row, move.col, player):
-                continue
-            
-            lines = []
-            for direction in PatternAnalyzer.DIRECTIONS:
-                line_info = PatternAnalyzer.get_line_info(
-                    temp_board,
-                    move.row,
-                    move.col,
-                    direction,
-                    player
-                )
-                if line_info.pattern == PatternType.WINNING:
-                    winning_moves.append(move)
-                    break
-        
+
+            lines = PatternAnalyzer.analyze_move(
+                board,
+                move,
+                player
+            )
+
+            if any(
+                line.pattern == PatternType.WINNING
+                for line in lines
+            ):
+                winning_moves.append(move)
+
         return winning_moves
-    
+
     @staticmethod
     def find_threats(
         board,
         valid_moves: list[Move],
         player: int
     ) -> dict[PatternType, list[Move]]:
-        """
-        Nhóm các nước theo loại threat tạo ra.
-        Trả về dict: {PatternType: [Move, ...]}
-        """
+
         threats = {}
-        
+
         for move in valid_moves:
+
             lines = PatternAnalyzer.analyze_move(
                 board,
                 move,
                 player
             )
-            
-            best_pattern = lines[0].pattern if lines else None
-            
-            if best_pattern and best_pattern != PatternType.LIVE_2:
-                if best_pattern not in threats:
-                    threats[best_pattern] = []
-                threats[best_pattern].append(move)
-        
+
+            if not lines:
+                continue
+
+            best_pattern = lines[0].pattern
+
+            if best_pattern == PatternType.NONE:
+                continue
+
+            if best_pattern not in threats:
+                threats[best_pattern] = []
+
+            threats[best_pattern].append(move)
+
         return threats
