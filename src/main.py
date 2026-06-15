@@ -90,8 +90,22 @@ def main():
 
             elif current_screen == GAME:
 
-                # Restart / Menu
+                # Handle board view buttons (Restart / Menu)
+                action = board_view.handle_event(
+                    event,
+                    manager.engine.state.game_over
+                )
 
+                if action == "restart":
+                    manager = GameManager(
+                        player_x_name,
+                        player_o_name
+                    )
+                    last_ai_move_time = 0
+                elif action == "menu":
+                    current_screen = MENU
+
+                # Keyboard shortcuts as fallback
                 if (
                     event.type
                     == pygame.KEYDOWN
@@ -188,12 +202,10 @@ def main():
                 current_player.name,
                 manager.engine.state.winner,
                 manager.engine.state.game_over,
-                getattr(
-                    manager.engine,
-                    "last_move",
-                    None
-                ),
-                current_player.is_human
+                manager.engine.state.last_move,
+                current_player.is_human,
+                player_x_name,
+                player_o_name
             )
 
         pygame.display.flip()

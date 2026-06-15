@@ -50,6 +50,8 @@ class GameEngine:
         if not success:
             return False
 
+        state.last_move = move
+
         if GameEngine.check_winner(
             state,
             move.row,
