@@ -56,6 +56,8 @@ def main():
 
             if event.type == pygame.QUIT:
                 running = False
+            if not running:
+                break
 
             # ==================
             # MENU
@@ -96,14 +98,19 @@ def main():
                     manager.engine.state.game_over
                 )
 
-                if action == "restart":
-                    manager = GameManager(
-                        player_x_name,
-                        player_o_name
-                    )
-                    last_ai_move_time = 0
-                elif action == "menu":
-                    current_screen = MENU
+                if action:
+
+                    if action == "restart":
+                        manager = GameManager(
+                            player_x_name,
+                            player_o_name
+                        )
+                        last_ai_move_time = 0
+
+                    elif action == "menu":
+                        current_screen = MENU
+
+                    continue
 
                 # Keyboard shortcuts as fallback
                 if (
