@@ -19,9 +19,11 @@ class PatternType(IntEnum):
     LIVE_2 = 10
 
     BLOCKED_3 = 20
+    THREAT_3 = 25
     LIVE_3 = 30
 
     DEAD_4 = 40
+    THREAT_4 = 45
     OPEN_4 = 50
 
     WINNING = 100
@@ -55,9 +57,11 @@ class PatternAnalyzer:
         PatternType.LIVE_2: 500,
 
         PatternType.BLOCKED_3: 3_000,
+        PatternType.THREAT_3: 8_000,
         PatternType.LIVE_3: 10_000,
 
         PatternType.DEAD_4: 30_000,
+        PatternType.THREAT_4: 80_000,
         PatternType.OPEN_4: 100_000,
 
         PatternType.WINNING: 1_000_000,
@@ -130,6 +134,17 @@ class PatternAnalyzer:
             empty_right
         )
 
+        pattern = max(
+            pattern,
+            PatternAnalyzer._classify_line_pattern(
+                board,
+                row,
+                col,
+                direction,
+                player
+            )
+        )
+
         return LineInfo(
             direction=direction,
             piece_count=piece_count,
@@ -167,7 +182,7 @@ class PatternAnalyzer:
             if open_one:
                 return PatternType.DEAD_4
 
-            return PatternType.DEAD_4
+            return PatternType.NONE
 
         if piece_count == 3:
 
@@ -189,18 +204,194 @@ class PatternAnalyzer:
         return PatternType.NONE
 
     @staticmethod
+    def _classify_line_pattern(
+        board,
+        row: int,
+        col: int,
+        direction: tuple,
+        player: int
+    ) -> PatternType:
+
+        cells = PatternAnalyzer._get_line_cells(
+            board,
+            row,
+            col,
+            direction,
+            player
+        )
+
+        center_index = len(cells) // 2
+        best_pattern = PatternType.NONE
+
+        for segment_length in (WIN_LENGTH, WIN_LENGTH + 1):
+            for start in range(len(cells) - segment_length + 1):
+                end = start + segment_length
+
+                if not (start <= center_index < end):
+                    continue
+
+                segment = cells[start:end]
+
+                if "O" in segment:
+                    continue
+
+                player_count = segment.count("X")
+                empty_count = segment.count(".")
+
+                if "XXXXX" in "".join(segment):
+                    return PatternType.WINNING
+
+                if player_count == 4 and empty_count >= 1:
+                    pattern = PatternAnalyzer._classify_four_segment(
+                        segment
+                    )
+                    best_pattern = max(best_pattern, pattern)
+
+                elif player_count == 3 and empty_count >= 2:
+                    pattern = PatternAnalyzer._classify_three_segment(
+                        segment
+                    )
+                    best_pattern = max(best_pattern, pattern)
+
+                elif player_count == 2 and empty_count >= 2:
+                    pattern = PatternAnalyzer._classify_two_segment(
+                        segment
+                    )
+                    best_pattern = max(best_pattern, pattern)
+
+        return best_pattern
+
+    @staticmethod
+    def _get_line_cells(
+        board,
+        row: int,
+        col: int,
+        direction: tuple,
+        player: int
+    ) -> list[str]:
+
+        dr, dc = direction
+        cells = []
+
+        for offset in range(-5, 6):
+            r = row + dr * offset
+            c = col + dc * offset
+
+            if not (
+                0 <= r < BOARD_SIZE
+                and 0 <= c < BOARD_SIZE
+            ):
+                cells.append("O")
+                continue
+
+            cell = board.get_cell(r, c)
+
+            if cell == player:
+                cells.append("X")
+            elif cell == EMPTY:
+                cells.append(".")
+            else:
+                cells.append("O")
+
+        return cells
+
+    @staticmethod
+    def _classify_four_segment(segment: list[str]) -> PatternType:
+
+        compact = "".join(segment)
+
+        if "XXXX" in compact:
+            x_start = compact.index("XXXX")
+            left_open = (
+                x_start - 1 >= 0
+                and compact[x_start - 1] == "."
+            )
+            right_index = x_start + 4
+            right_open = (
+                right_index < len(compact)
+                and compact[right_index] == "."
+            )
+
+            if left_open and right_open:
+                return PatternType.OPEN_4
+
+            return PatternType.DEAD_4
+
+        return PatternType.THREAT_4
+
+    @staticmethod
+    def _classify_three_segment(segment: list[str]) -> PatternType:
+
+        compact = "".join(segment)
+
+        if "XXX" in compact:
+            x_start = compact.index("XXX")
+            left_open = (
+                x_start - 1 >= 0
+                and compact[x_start - 1] == "."
+            )
+            right_index = x_start + 3
+            right_open = (
+                right_index < len(compact)
+                and compact[right_index] == "."
+            )
+
+            if left_open and right_open:
+                return PatternType.LIVE_3
+
+            if left_open or right_open:
+                return PatternType.BLOCKED_3
+
+            return PatternType.NONE
+
+        return PatternType.THREAT_3
+
+    @staticmethod
+    def _classify_two_segment(segment: list[str]) -> PatternType:
+
+        compact = "".join(segment)
+
+        if "XX" not in compact:
+            return PatternType.NONE
+
+        x_start = compact.index("XX")
+        left_open = (
+            x_start - 1 >= 0
+            and compact[x_start - 1] == "."
+        )
+        right_index = x_start + 2
+        right_open = (
+            right_index < len(compact)
+            and compact[right_index] == "."
+        )
+
+        if left_open and right_open:
+            return PatternType.LIVE_2
+
+        return PatternType.NONE
+
+    @staticmethod
     def analyze_move(
         board,
         move: Move,
         player: int
     ) -> list[LineInfo]:
 
+        if (
+            not (0 <= move.row < BOARD_SIZE)
+            or not (0 <= move.col < BOARD_SIZE)
+            or board.get_cell(move.row, move.col) != EMPTY
+        ):
+            return []
+
         temp_board = board.clone()
-        temp_board.place_piece(
+
+        if not temp_board.place_piece(
             move.row,
             move.col,
             player
-        )
+        ):
+            return []
 
         lines = []
 

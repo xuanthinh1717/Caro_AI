@@ -57,6 +57,12 @@ class BoardAnalyzer:
 
     DOUBLE_DEAD4_BONUS = 100_000
 
+    DOUBLE_THREAT4_BONUS = 300_000
+
+    DOUBLE_THREAT3_BONUS = 30_000
+
+    MIXED_THREE_BONUS = 40_000
+
     @staticmethod
     def analyze_cell(
         board,
@@ -141,8 +147,16 @@ class BoardAnalyzer:
             PatternType.LIVE_3
         )
 
+        threat3_count = patterns.count(
+            PatternType.THREAT_3
+        )
+
         open4_count = patterns.count(
             PatternType.OPEN_4
+        )
+
+        threat4_count = patterns.count(
+            PatternType.THREAT_4
         )
 
         dead4_count = patterns.count(
@@ -158,14 +172,29 @@ class BoardAnalyzer:
                 BoardAnalyzer.DOUBLE_LIVE3_BONUS
             )
 
+        if live3_count >= 1 and threat3_count >= 1:
+            score += (
+                BoardAnalyzer.MIXED_THREE_BONUS
+            )
+
         if open4_count >= 2:
             score += (
                 BoardAnalyzer.DOUBLE_OPEN4_BONUS
             )
 
+        if threat4_count >= 2:
+            score += (
+                BoardAnalyzer.DOUBLE_THREAT4_BONUS
+            )
+
         if dead4_count >= 2:
             score += (
                 BoardAnalyzer.DOUBLE_DEAD4_BONUS
+            )
+
+        if threat3_count >= 2:
+            score += (
+                BoardAnalyzer.DOUBLE_THREAT3_BONUS
             )
 
         return score
@@ -249,7 +278,10 @@ class BoardAnalyzer:
                 in [
                     PatternType.WINNING,
                     PatternType.OPEN_4,
+                    PatternType.THREAT_4,
                     PatternType.DEAD_4,
+                    PatternType.LIVE_3,
+                    PatternType.THREAT_3,
                 ]
             )
 
@@ -258,7 +290,10 @@ class BoardAnalyzer:
                 in [
                     PatternType.WINNING,
                     PatternType.OPEN_4,
+                    PatternType.THREAT_4,
                     PatternType.DEAD_4,
+                    PatternType.LIVE_3,
+                    PatternType.THREAT_3,
                 ]
             )
 
