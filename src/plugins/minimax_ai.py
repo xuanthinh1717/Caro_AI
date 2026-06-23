@@ -5,6 +5,7 @@ from ai.base import AIPlayer
 from game.constants import BOARD_SIZE, EMPTY, PLAYER_X, PLAYER_O
 from game.move import Move
 from game.pattern import PatternAnalyzer
+from game.board_analyzer import BoardAnalyzer
 
 
 class MinimaxAlphaBetaAI(AIPlayer):
@@ -17,7 +18,7 @@ class MinimaxAlphaBetaAI(AIPlayer):
     """
 
     def __init__(self):
-        self.max_depth = 2
+        self.max_depth = 3
         self.max_candidates = 8
         self.nodes_searched = 0
 
@@ -119,8 +120,26 @@ class MinimaxAlphaBetaAI(AIPlayer):
             )
 
             return move
+        
+        # 4. Nếu đối thủ có thế 3 gãy, chặn ngay.
+        broken_three_blocks = self.find_broken_three_blocks(
+            state,
+            opponent
+        )
 
-        # 4. Lấy các nước đi ứng viên thay vì xét toàn bộ bàn cờ.
+        if broken_three_blocks:
+            move = broken_three_blocks[0]
+
+            self.print_decision_info(
+                start_time=start_time,
+                ai_player=ai_player,
+                move=move,
+                score="BLOCK_BROKEN_THREE"
+            )
+
+            return move
+
+        # 5. Lấy các nước đi ứng viên thay vì xét toàn bộ bàn cờ.
         candidate_moves = self.get_ordered_candidate_moves(
             state,
             ai_player
@@ -387,23 +406,111 @@ class MinimaxAlphaBetaAI(AIPlayer):
                         blocks.append(Move(right_r, right_c))
 
         return blocks
+    
+    def find_broken_three_blocks(self, state, player):
+        """
+        Tìm các ô cần chặn khi player có thế 3 gãy nguy hiểm.
+
+        Các mẫu được phát hiện:
+            . X X . X .
+            . X . X X .
+
+        Hàm trả về danh sách Move cần chặn.
+        """
+        board = state.board
+        blocks = []
+
+        directions = [
+            (0, 1),    # ngang
+            (1, 0),    # dọc
+            (1, 1),    # chéo xuống phải
+            (1, -1),   # chéo xuống trái
+        ]
+
+        for row in range(BOARD_SIZE):
+            for col in range(BOARD_SIZE):
+                for dr, dc in directions:
+                    cells = []
+                    positions = []
+
+                    for i in range(6):
+                        r = row + dr * i
+                        c = col + dc * i
+
+                        if not (0 <= r < BOARD_SIZE and 0 <= c < BOARD_SIZE):
+                            break
+
+                        cells.append(board.get_cell(r, c))
+                        positions.append((r, c))
+
+                    if len(cells) != 6:
+                        continue
+
+                    # Mẫu: . X X . X .
+                    if (
+                        cells[0] == EMPTY and
+                        cells[1] == player and
+                        cells[2] == player and
+                        cells[3] == EMPTY and
+                        cells[4] == player and
+                        cells[5] == EMPTY
+                    ):
+                        block_r, block_c = positions[3]
+                        blocks.append(Move(block_r, block_c))
+
+                    # Mẫu: . X . X X .
+                    if (
+                        cells[0] == EMPTY and
+                        cells[1] == player and
+                        cells[2] == EMPTY and
+                        cells[3] == player and
+                        cells[4] == player and
+                        cells[5] == EMPTY
+                    ):
+                        block_r, block_c = positions[2]
+                        blocks.append(Move(block_r, block_c))
+
+        return blocks
 
     def get_ordered_candidate_moves(self, state, ai_player):
         """
-        Lấy danh sách nước đi ứng viên và sắp xếp theo điểm đánh giá sơ bộ.
-        Việc sắp xếp giúp Alpha-Beta cắt nhánh hiệu quả hơn.
-        """
-        moves = state.get_candidate_moves(distance=2)
+        Lấy và sắp xếp các nước đi ứng viên bằng BoardAnalyzer.
 
-        if not moves:
+        BoardAnalyzer đã phân tích mức độ nguy hiểm/tốt của từng ô,
+        bao gồm cả khả năng tấn công và phòng thủ.
+        Việc sắp xếp nước đi tốt lên trước giúp Alpha-Beta cắt nhánh hiệu quả hơn.
+        """
+
+        analyses = BoardAnalyzer.get_candidate_analysis(
+            state.board,
+            distance=2,
+            top_n=self.max_candidates
+        )
+
+        if not analyses:
             moves = state.get_valid_moves()
+            return moves[:self.max_candidates]
 
         scored_moves = []
 
-        for move in moves:
-            new_state = state.simulate_move(move)
-            score = self.evaluate(new_state, ai_player)
-            scored_moves.append((score, move))
+        for analysis in analyses:
+            if ai_player == PLAYER_X:
+                attack_score = analysis.x_score
+                defense_score = analysis.o_score
+            else:
+                attack_score = analysis.o_score
+                defense_score = analysis.x_score
+
+            # Ưu tiên cả tấn công và phòng thủ.
+            # Defense nhân nhẹ 1.15 để AI không bỏ qua threat của đối thủ.
+            priority = attack_score + defense_score * 1.15
+
+            scored_moves.append(
+                (
+                    priority,
+                    analysis.move
+                )
+            )
 
         scored_moves.sort(
             key=lambda item: item[0],
