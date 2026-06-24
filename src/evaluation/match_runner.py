@@ -1,5 +1,7 @@
 import time
 import random
+import io
+import contextlib
 
 from game.move import Move
 
@@ -93,9 +95,12 @@ class MatchRunner:
 
             think_start = time.perf_counter()
 
-            move = current_player.choose_move(
-                engine.state.clone()
-            )
+            with contextlib.redirect_stdout(
+                io.StringIO()
+            ):
+                move = current_player.choose_move(
+                    engine.state.clone()
+                )
 
             think_time = (
                 time.perf_counter()
