@@ -1,9 +1,10 @@
 import math
 import random
 import time
-import copy
-from plugins.opening_book import OpeningBook
-from ai.vcf_solver import VCFSolver
+from ai.base import AIPlayer
+from game.move import Move
+from game.pattern import PatternAnalyzer
+from game.board_analyzer import BoardAnalyzer
 
 class MCTSNode:
     def __init__(self, state, parent=None, move=None, heuristic_score=0):
@@ -12,9 +13,9 @@ class MCTSNode:
         self.move = move
         self.children = []
         
+        # MCTS + RAVE stats
         self.visits = 0
         self.wins = 0
-        
         self.rave_visits = 0
         self.rave_wins = 0
         
@@ -22,11 +23,13 @@ class MCTSNode:
         self.untried_moves = self._get_smart_moves(state)
 
     def _get_smart_moves(self, state):
-        """Ưu tiên mở rộng các nước đi có tiềm năng theo Heuristic"""
-        if hasattr(state, 'get_candidate_moves'):
-            moves = state.get_candidate_moves()
-            return [m for m, score in moves]
-        return state.get_empty_cells()
+        """Sử dụng BoardAnalyzer chuẩn của nhóm để lấy candidate moves có ưu tiên"""
+        candidates = BoardAnalyzer.get_candidate_analysis(state.board, distance=2, top_n=15)
+        if candidates:
+            return [(cand.move, cand.priority_score) for cand in candidates]
+        
+        valid_moves = state.get_valid_moves()
+        return [(m, 0) for m in valid_moves]
 
     def uct_select_child(self, c_param=1.414, rave_equiv=300):
         best_score = float('-inf')
@@ -37,11 +40,9 @@ class MCTSNode:
                 
             mcts_exploit = child.wins / child.visits
             explore = math.sqrt(math.log(self.visits) / child.visits)
-            
             rave_exploit = child.rave_wins / child.rave_visits if child.rave_visits > 0 else 0
             
             beta = math.sqrt(rave_equiv / (3 * child.visits + rave_equiv))
-            
             score = (1 - beta) * mcts_exploit + beta * rave_exploit + c_param * explore
             
             if score > best_score:
@@ -50,106 +51,122 @@ class MCTSNode:
         return best_child
 
     def expand(self):
-        move = self.untried_moves.pop(0)
-        next_state = copy.deepcopy(self.state)
-        next_state.make_move(move)
-        
-        h_score = next_state.evaluate_heuristic() if hasattr(next_state, 'evaluate_heuristic') else 0
+        move, h_score = self.untried_moves.pop(0)
+        next_state = self.state.simulate_move(move)
         child_node = MCTSNode(next_state, parent=self, move=move, heuristic_score=h_score)
         self.children.append(child_node)
         return child_node
 
-class MctsAI:
-    def __init__(self, time_limit=5.0):
+class MctsAI(AIPlayer):
+    def __init__(self, time_limit=3.0):
+        super().__init__()
         self.time_limit = time_limit
-        self.name = "MCTS-RAVE Ultimate"
-        self.book = OpeningBook()
-        self.vcf = VCFSolver()
         self.nodes_simulated = 0
 
-    def get_move(self, board_state):
+    @property
+    def name(self) -> str:
+        return "MCTS-RAVE Ultimate"
+
+    def choose_move(self, state) -> Move:
         self.nodes_simulated = 0
+        current_player = state.current_player
+        valid_moves = state.get_valid_moves()
+
+        if not valid_moves:
+            raise Exception("Không còn nước đi hợp lệ")
+
+        if len(valid_moves) == 15 * 15:
+            return Move(7, 7)
+
+        winning_moves = PatternAnalyzer.find_winning_moves(state.board, valid_moves, current_player)
+        if winning_moves:
+            return winning_moves[0]
         
-        if hasattr(board_state, 'zobrist_hash'):
-            book_move = self.book.get_move(board_state.zobrist_hash)
-            if book_move:
-                print(f"[{self.name}] Tìm thấy thế khai cuộc trong sách!")
-                return book_move
+        opponent = state.get_opponent()
+        opponent_wins = PatternAnalyzer.find_winning_moves(state.board, valid_moves, opponent)
+        if opponent_wins:
+            return opponent_wins[0]
 
-        vcf_move = self.vcf.find_winning_path(board_state, board_state.current_player)
-        if vcf_move:
-            print(f"[{self.name}] Phát hiện đường thắng bắt buộc (VCF)!")
-            return vcf_move
-
-        root_node = MCTSNode(board_state)
+        root_node = MCTSNode(state)
         start_time = time.time()
 
         while time.time() - start_time < self.time_limit:
             node = root_node
-            state = copy.deepcopy(board_state)
-            
-            played_moves = { 'X': set(), 'O': set() }
+            sim_state = state.clone()
+            played_moves = { 1: set(), 2: set() }
 
+            # Selection
             while not node.untried_moves and node.children:
                 node = node.uct_select_child()
-                state.make_move(node.move)
-                played_moves[state.current_player].add(node.move)
+                sim_state = sim_state.simulate_move(node.move)
+                played_moves[sim_state.get_opponent()].add(node.move)
 
+            # Expansion
             if node.untried_moves:
                 node = node.expand()
-                state.make_move(node.move)
-                played_moves[state.current_player].add(node.move)
+                sim_state = sim_state.simulate_move(node.move)
+                played_moves[sim_state.get_opponent()].add(node.move)
 
-            result, simulated_moves = self.heavy_playout(state)
-            for p in ['X', 'O']:
+            # Simulation
+            result, simulated_moves = self.heavy_playout(sim_state)
+            
+            for p in [1, 2]:
                 played_moves[p].update(simulated_moves[p])
             self.nodes_simulated += 1
 
             while node is not None:
                 node.visits += 1
-                if result == board_state.current_player: 
+                if result == current_player: 
                     node.wins += 1
-                elif result == 'DRAW':
+                elif result == 0: # Hòa
                     node.wins += 0.5
                     
                 if node.parent:
                     for sibling in node.parent.children:
-                        if sibling.move in played_moves[board_state.current_player]:
+                        if sibling.move in played_moves[current_player]:
                             sibling.rave_visits += 1
-                            if result == board_state.current_player:
+                            if result == current_player:
                                 sibling.rave_wins += 1
-                            elif result == 'DRAW':
+                            elif result == 0:
                                 sibling.rave_wins += 0.5
                 node = node.parent
 
         if not root_node.children:
-            return None
+            return valid_moves[0]
 
         best_child = max(root_node.children, key=lambda c: c.visits)
-        print(f"[{self.name}] Đã duyệt {self.nodes_simulated} nodes. Win-rate gốc: {best_child.wins/best_child.visits:.2f}")
+        print(f"[{self.name}] Đã duyệt {self.nodes_simulated} nodes.")
+        
         return best_child.move
 
     def heavy_playout(self, state):
-        current_state = state 
+        current_state = state.clone()
         depth = 0
-        simulated_moves = { 'X': set(), 'O': set() }
+        simulated_moves = { 1: set(), 2: set() }
         
-        while not current_state.is_game_over() and depth < 50:
-            best_move = None
+        while not current_state.game_over and depth < 40:
             player = current_state.current_player
+            valid_moves = current_state.get_valid_moves()
+            if not valid_moves:
+                break
+                
+            win_moves = PatternAnalyzer.find_winning_moves(current_state.board, valid_moves, player)
+            if win_moves:
+                best_move = win_moves[0]
+            else:
+                opp = current_state.get_opponent()
+                opp_wins = PatternAnalyzer.find_winning_moves(current_state.board, valid_moves, opp)
+                if opp_wins:
+                    best_move = opp_wins[0]
+                else:
+                    candidates = current_state.get_candidate_moves(distance=1)
+                    if candidates:
+                        best_move = random.choice(candidates)
+                    else:
+                        best_move = random.choice(valid_moves)
             
-            if hasattr(current_state, 'get_winning_move'):
-                best_move = current_state.get_winning_move(player)
-                if not best_move:
-                    best_move = current_state.get_winning_move(1 - player)
-
-            if not best_move:
-                moves = current_state.get_candidate_moves() if hasattr(current_state, 'get_candidate_moves') else current_state.get_empty_cells()
-                if not moves: break
-                best_move = random.choice(moves[:10]) 
-            
-            current_state.make_move(best_move)
+            current_state = current_state.simulate_move(best_move)
             simulated_moves[player].add(best_move)
             depth += 1
             
-        return current_state.get_winner(), simulated_moves
+        return current_state.winner or 0, simulated_moves
