@@ -5,7 +5,7 @@ import time
 from ai.base import AIPlayer
 from game.constants import BOARD_SIZE, EMPTY, PLAYER_X, PLAYER_O
 from game.move import Move
-from game.pattern import PatternAnalyzer
+from game.pattern import PatternAnalyzer, PatternType
 
 
 class MCTSNode:
@@ -96,6 +96,15 @@ class MCTSAI(AIPlayer):
         if opponent_winning_moves:
             return opponent_winning_moves[0]
 
+        urgent_block = self.find_urgent_block(
+            state,
+            valid_moves,
+            opponent
+        )
+
+        if urgent_block:
+            return urgent_block
+
         root = MCTSNode(
             state=state,
             untried_moves=self.get_candidate_moves(state)
@@ -143,6 +152,30 @@ class MCTSAI(AIPlayer):
         )
 
         return move
+
+    def find_urgent_block(self, state, valid_moves, opponent):
+        threats = PatternAnalyzer.find_threats(
+            state.board,
+            valid_moves,
+            opponent
+        )
+
+        priority_patterns = [
+            PatternType.OPEN_4,
+            PatternType.THREAT_4,
+            PatternType.DEAD_4,
+            PatternType.LIVE_3,
+            PatternType.THREAT_3,
+            PatternType.BLOCKED_3,
+        ]
+
+        for pattern in priority_patterns:
+            moves = threats.get(pattern)
+
+            if moves:
+                return moves[0]
+
+        return None
 
     def select(self, node):
         while (
@@ -196,6 +229,36 @@ class MCTSAI(AIPlayer):
 
         if not valid_moves:
             return None
+
+        current_player = state.current_player
+        opponent = self.get_opponent(current_player)
+
+        winning_moves = PatternAnalyzer.find_winning_moves(
+            state.board,
+            valid_moves,
+            current_player
+        )
+
+        if winning_moves:
+            return winning_moves[0]
+
+        opponent_winning_moves = PatternAnalyzer.find_winning_moves(
+            state.board,
+            valid_moves,
+            opponent
+        )
+
+        if opponent_winning_moves:
+            return opponent_winning_moves[0]
+
+        urgent_block = self.find_urgent_block(
+            state,
+            valid_moves,
+            opponent
+        )
+
+        if urgent_block:
+            return urgent_block
 
         candidates = state.get_candidate_moves(
             distance=1
