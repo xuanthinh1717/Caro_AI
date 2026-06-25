@@ -16,17 +16,17 @@ class PatternType(IntEnum):
 
     NONE = 0
 
-    LIVE_2 = 10
+    LIVE_2 = 100
 
-    BLOCKED_3 = 20
-    THREAT_3 = 25
-    LIVE_3 = 30
+    BLOCKED_3 = 1000
+    THREAT_3 = 2000
+    LIVE_3 = 5000
 
-    DEAD_4 = 40
-    THREAT_4 = 45
-    OPEN_4 = 50
+    DEAD_4 = 20000
+    THREAT_4 = 50000
+    OPEN_4 = 100000
 
-    WINNING = 100
+    WINNING = 10000000
 
 
 @dataclass
