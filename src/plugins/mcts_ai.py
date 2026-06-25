@@ -5,28 +5,33 @@ from ai.base import AIPlayer
 from game.move import Move
 from game.pattern import PatternAnalyzer
 from game.board_analyzer import BoardAnalyzer
+from game.constants import PLAYER_X, PLAYER_O
 
 class MCTSNode:
-    def __init__(self, state, parent=None, move=None, heuristic_score=0):
+    def __init__(self, state, parent=None, move=None, is_root=False):
         self.state = state
         self.parent = parent
         self.move = move
         self.children = []
         
-        # MCTS + RAVE stats
         self.visits = 0
         self.wins = 0
         self.rave_visits = 0
         self.rave_wins = 0
         
-        self.heuristic_score = heuristic_score 
-        self.untried_moves = self._get_smart_moves(state)
+        self.untried_moves = self._get_smart_moves(state, is_root)
 
-    def _get_smart_moves(self, state):
-        """Sử dụng BoardAnalyzer chuẩn của nhóm để lấy candidate moves có ưu tiên"""
-        candidates = BoardAnalyzer.get_candidate_analysis(state.board, distance=2, top_n=15)
-        if candidates:
-            return [(cand.move, cand.priority_score) for cand in candidates]
+    def _get_smart_moves(self, state, is_root):
+        """Tối ưu tốc độ mở rộng nhánh (Expansion Culling)"""
+        if is_root:
+            candidates = BoardAnalyzer.get_candidate_analysis(state.board, distance=2, top_n=12)
+            if candidates:
+                return [(cand.move, cand.priority_score) for cand in candidates]
+        else:
+            cands = state.get_candidate_moves(distance=1)
+            if cands:
+                random.shuffle(cands)
+                return [(m, 0) for m in cands[:8]]
         
         valid_moves = state.get_valid_moves()
         return [(m, 0) for m in valid_moves]
@@ -51,9 +56,9 @@ class MCTSNode:
         return best_child
 
     def expand(self):
-        move, h_score = self.untried_moves.pop(0)
+        move, _ = self.untried_moves.pop(0)
         next_state = self.state.simulate_move(move)
-        child_node = MCTSNode(next_state, parent=self, move=move, heuristic_score=h_score)
+        child_node = MCTSNode(next_state, parent=self, move=move, is_root=False)
         self.children.append(child_node)
         return child_node
 
@@ -62,13 +67,19 @@ class MctsAI(AIPlayer):
         super().__init__()
         self.time_limit = time_limit
         self.nodes_simulated = 0
+        self.tt = {} 
 
     @property
     def name(self) -> str:
         return "MCTS-RAVE Ultimate"
 
+    def _get_state_hash(self, state):
+        """Băm trạng thái nhanh thành chuỗi để lưu Cache (O(1) lookup)"""
+        return str(state.board.grid)
+
     def choose_move(self, state) -> Move:
         self.nodes_simulated = 0
+        self.tt.clear() 
         current_player = state.current_player
         valid_moves = state.get_valid_moves()
 
@@ -76,7 +87,7 @@ class MctsAI(AIPlayer):
             raise Exception("Không còn nước đi hợp lệ")
 
         if len(valid_moves) == 15 * 15:
-            return Move(7, 7)
+            return Move(7, 7) 
 
         winning_moves = PatternAnalyzer.find_winning_moves(state.board, valid_moves, current_player)
         if winning_moves:
@@ -87,7 +98,7 @@ class MctsAI(AIPlayer):
         if opponent_wins:
             return opponent_wins[0]
 
-        root_node = MCTSNode(state)
+        root_node = MCTSNode(state, is_root=True)
         start_time = time.time()
 
         while time.time() - start_time < self.time_limit:
@@ -95,24 +106,27 @@ class MctsAI(AIPlayer):
             sim_state = state.clone()
             played_moves = { 1: set(), 2: set() }
 
-            # Selection
             while not node.untried_moves and node.children:
                 node = node.uct_select_child()
                 sim_state = sim_state.simulate_move(node.move)
                 played_moves[sim_state.get_opponent()].add(node.move)
 
-            # Expansion
             if node.untried_moves:
                 node = node.expand()
                 sim_state = sim_state.simulate_move(node.move)
                 played_moves[sim_state.get_opponent()].add(node.move)
 
-            # Simulation
-            result, simulated_moves = self.heavy_playout(sim_state)
-            
+            state_hash = self._get_state_hash(sim_state)
+            if state_hash in self.tt:
+                result = self.tt[state_hash]
+                simulated_moves = {1: set(), 2: set()} 
+            else:
+                result, simulated_moves = self.light_playout(sim_state)
+                self.tt[state_hash] = result
+                self.nodes_simulated += 1
+
             for p in [1, 2]:
                 played_moves[p].update(simulated_moves[p])
-            self.nodes_simulated += 1
 
             while node is not None:
                 node.visits += 1
@@ -135,16 +149,17 @@ class MctsAI(AIPlayer):
             return valid_moves[0]
 
         best_child = max(root_node.children, key=lambda c: c.visits)
-        print(f"[{self.name}] Đã duyệt {self.nodes_simulated} nodes.")
+        print(f"[{self.name}] Đã duyệt {self.nodes_simulated} nodes. (Tăng tốc = {round((self.nodes_simulated/self.time_limit),0)} node/s)")
         
         return best_child.move
 
-    def heavy_playout(self, state):
+    def light_playout(self, state):
+        """Mô phỏng siêu tốc: Bỏ hết Heuristic nặng, chỉ check block/win trực tiếp rồi random cục bộ"""
         current_state = state.clone()
         depth = 0
         simulated_moves = { 1: set(), 2: set() }
         
-        while not current_state.game_over and depth < 40:
+        while not current_state.game_over and depth < 25:
             player = current_state.current_player
             valid_moves = current_state.get_valid_moves()
             if not valid_moves:
